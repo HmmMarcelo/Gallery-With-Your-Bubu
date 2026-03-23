@@ -60,7 +60,7 @@ class _MyHomePageState extends State<MyHomePage> {
         ),
       ),
       body: MediaGallery(
-        directory: Platform.environment['USERPROFILE'] != null
+        initialDirectory: Platform.environment['USERPROFILE'] != null
             ? '${Platform.environment['USERPROFILE']}\\Pictures'
             : '.',
       ),

@@ -1,7 +1,9 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
+import 'package:filepicker_windows/filepicker_windows.dart';
 
+// --- MediaFile class ---
 class MediaFile {
   final String path;
   final FileSystemEntityType type;
@@ -17,14 +19,60 @@ class MediaFile {
 }
 
 class MediaGallery extends StatefulWidget {
-  final String directory;
-  const MediaGallery({super.key, required this.directory});
+  final String initialDirectory;
+  const MediaGallery({super.key, required this.initialDirectory});
 
   @override
   State<MediaGallery> createState() => _MediaGalleryState();
 }
 
 class _MediaGalleryState extends State<MediaGallery> {
+  void _showSearchParametersDialog() async {
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Search Parameters'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.date_range),
+                title: Text(
+                  dateRange == null
+                      ? 'Pick date range'
+                      : '${dateRange!.start.year}/${dateRange!.start.month}/${dateRange!.start.day} - ${dateRange!.end.year}/${dateRange!.end.month}/${dateRange!.end.day}',
+                ),
+                onTap: () async {
+                  final picked = await showDateRangePicker(
+                    context: context,
+                    firstDate: DateTime(1970),
+                    lastDate: DateTime.now().add(const Duration(days: 1)),
+                  );
+                  if (picked != null) {
+                    setState(() {
+                      dateRange = picked;
+                      _applyFilters();
+                    });
+                  }
+                  Navigator.of(context).pop();
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  late String directory;
+  double previewSize = 120;
   List<MediaFile> mediaFiles = [];
   List<MediaFile> filteredFiles = [];
   bool loading = true;
@@ -295,12 +343,13 @@ class _MediaGalleryState extends State<MediaGallery> {
   @override
   void initState() {
     super.initState();
+    directory = widget.initialDirectory;
     _scanMediaFiles();
   }
 
   Future<void> _scanMediaFiles() async {
     setState(() => loading = true);
-    final dir = Directory(widget.directory);
+    final dir = Directory(directory);
     final files = <MediaFile>[];
     await for (var entity in dir.list(recursive: true, followLinks: false)) {
       if (entity is File) {
@@ -365,16 +414,72 @@ class _MediaGalleryState extends State<MediaGallery> {
     }
     return Column(
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        // Top bar with color fade and glass effect
+        Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                Colors.deepPurple.withOpacity(0.7),
+                Colors.purple.withOpacity(0.5),
+                Colors.black.withOpacity(0.3),
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.deepPurple.withOpacity(0.2),
+                blurRadius: 16,
+                spreadRadius: 2,
+                offset: const Offset(0, 4),
+              ),
+            ],
+            backgroundBlendMode: BlendMode.overlay,
+          ),
+          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Row(
             children: [
-              Expanded(
+              _GlassIconButton(
+                icon: Icons.settings,
+                tooltip: 'Search Parameters',
+                onTap: _showSearchParametersDialog,
+              ),
+              _GlassIconButton(
+                icon: Icons.folder_open,
+                tooltip: 'Pick directory',
+                onTap: () async {
+                  final picker = DirectoryPicker();
+                  final dir = picker.getDirectory();
+                  if (dir != null) {
+                    setState(() {
+                      directory = dir.path;
+                      loading = true;
+                    });
+                    await _scanMediaFiles();
+                  }
+                },
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 180,
                 child: TextField(
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     hintText: 'Search by name...',
-                    prefixIcon: Icon(Icons.search),
+                    prefixIcon: const Icon(Icons.search),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.08),
+                    contentPadding: const EdgeInsets.symmetric(
+                      vertical: 0,
+                      horizontal: 8,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
                   ),
+                  style: const TextStyle(fontSize: 14),
                   onChanged: (val) {
                     setState(() {
                       searchText = val;
@@ -383,32 +488,39 @@ class _MediaGalleryState extends State<MediaGallery> {
                   },
                 ),
               ),
-              const SizedBox(width: 8),
-              ElevatedButton.icon(
-                icon: const Icon(Icons.date_range),
-                label: Text(
-                  dateRange == null
-                      ? 'Pick date range'
-                      : '${dateRange!.start.year}/${dateRange!.start.month}/${dateRange!.start.day} - ${dateRange!.end.year}/${dateRange!.end.month}/${dateRange!.end.day}',
-                ),
-                onPressed: () async {
-                  final picked = await showDateRangePicker(
-                    context: context,
-                    firstDate: DateTime(1970),
-                    lastDate: DateTime.now().add(const Duration(days: 1)),
-                  );
-                  if (picked != null) {
-                    setState(() {
-                      dateRange = picked;
-                      _applyFilters();
-                    });
-                  }
-                },
+              const SizedBox(width: 12),
+              const Text(
+                'Preview size',
+                style: TextStyle(fontWeight: FontWeight.w500),
               ),
-              const SizedBox(width: 8),
-              const Text('Sort by: '),
+              SizedBox(
+                width: 120,
+                child: Slider(
+                  min: 60,
+                  max: 240,
+                  value: previewSize,
+                  onChanged: (val) {
+                    setState(() {
+                      previewSize = val;
+                    });
+                  },
+                  activeColor: Colors.deepPurpleAccent,
+                  thumbColor: Colors.white,
+                ),
+              ),
+              Text(
+                '${previewSize.toInt()}',
+                style: const TextStyle(fontWeight: FontWeight.w500),
+              ),
+              const SizedBox(width: 12),
+              const Text(
+                'Sort by:',
+                style: TextStyle(fontWeight: FontWeight.w500),
+              ),
               DropdownButton<String>(
                 value: sortBy,
+                dropdownColor: Colors.black.withOpacity(0.85),
+                style: const TextStyle(color: Colors.white),
                 items: sortOptions
                     .map(
                       (opt) => DropdownMenuItem<String>(
@@ -429,54 +541,65 @@ class _MediaGalleryState extends State<MediaGallery> {
             ],
           ),
         ),
+        // Gallery grid
         Expanded(
           child: GridView.builder(
-            padding: const EdgeInsets.all(8),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 5,
-              crossAxisSpacing: 8,
-              mainAxisSpacing: 8,
+            padding: const EdgeInsets.all(12),
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount:
+                  (MediaQuery.of(context).size.width / (previewSize + 16))
+                      .floor()
+                      .clamp(1, 8),
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+              childAspectRatio: 1,
             ),
             itemCount: filteredFiles.length,
-            itemBuilder: (context, index) {
-              final file = filteredFiles[index];
+            itemBuilder: (context, idx) {
+              final file = filteredFiles[idx];
               final ext = p.extension(file.path).toLowerCase();
-              if ([
-                ".jpg",
-                ".jpeg",
-                ".png",
-                ".gif",
-                ".bmp",
-                ".webp",
-                ".heic",
-                ".tiff",
-                ".svg",
-              ].contains(ext)) {
-                return Image.file(File(file.path), fit: BoxFit.cover);
-              } else if ([
-                ".mp4",
-                ".mov",
-                ".avi",
-                ".mkv",
-                ".webm",
-                ".wmv",
-                ".flv",
-                ".mpg",
-                ".mpeg",
-                ".3gp",
-                ".m4v",
-                ".ogg",
-                ".ogv",
-              ].contains(ext)) {
-                return Container(
-                  color: Colors.black26,
-                  child: const Center(child: Icon(Icons.videocam, size: 48)),
+              // Basic image extensions
+              const imageExts = [
+                '.jpg',
+                '.jpeg',
+                '.png',
+                '.gif',
+                '.bmp',
+                '.webp',
+                '.heic',
+                '.tiff',
+              ];
+              if (imageExts.contains(ext)) {
+                return ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.file(
+                    File(file.path),
+                    width: previewSize,
+                    height: previewSize,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stack) => Container(
+                      color: Colors.black26,
+                      child: const Icon(
+                        Icons.broken_image,
+                        color: Colors.white54,
+                        size: 40,
+                      ),
+                    ),
+                  ),
                 );
               } else {
+                // Placeholder for non-image files
                 return Container(
-                  color: Colors.black12,
-                  child: const Center(
-                    child: Icon(Icons.insert_drive_file, size: 32),
+                  decoration: BoxDecoration(
+                    color: Colors.deepPurple.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Center(
+                    child: Icon(
+                      Icons.insert_drive_file,
+                      color: Colors.white54,
+                      size: previewSize * 0.5,
+                    ),
                   ),
                 );
               }
@@ -484,6 +607,65 @@ class _MediaGalleryState extends State<MediaGallery> {
           ),
         ),
       ],
+    );
+  }
+}
+
+// Glass effect icon button with hover glow
+class _GlassIconButton extends StatefulWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback? onTap;
+  const _GlassIconButton({
+    required this.icon,
+    required this.tooltip,
+    this.onTap,
+  });
+
+  @override
+  State<_GlassIconButton> createState() => _GlassIconButtonState();
+}
+
+class _GlassIconButtonState extends State<_GlassIconButton> {
+  bool _hovering = false;
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        margin: const EdgeInsets.symmetric(horizontal: 2),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(_hovering ? 0.18 : 0.12),
+          borderRadius: BorderRadius.circular(10),
+          boxShadow: _hovering
+              ? [
+                  BoxShadow(
+                    color: Colors.deepPurpleAccent.withOpacity(0.4),
+                    blurRadius: 12,
+                    spreadRadius: 1,
+                  ),
+                ]
+              : [],
+          border: Border.all(
+            color: _hovering
+                ? Colors.deepPurpleAccent.withOpacity(0.5)
+                : Colors.white.withOpacity(0.08),
+            width: 1.2,
+          ),
+          backgroundBlendMode: BlendMode.overlay,
+        ),
+        child: IconButton(
+          icon: Icon(
+            widget.icon,
+            color: Colors.white.withOpacity(_hovering ? 0.95 : 0.8),
+          ),
+          tooltip: widget.tooltip,
+          onPressed: widget.onTap,
+          splashRadius: 22,
+        ),
+      ),
     );
   }
 }
