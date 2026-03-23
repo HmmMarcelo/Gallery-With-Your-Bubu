@@ -1,17 +1,32 @@
-# my_pcs_gallery
+# Oui Gallery
 
-A new Flutter project.
+Oui Gallery is a fast, modern, cross-platform gallery app for Windows, Linux, macOS, and Android, built with Flutter. It helps you discover, sort, and view all your photos, videos, and media files in a beautiful dark mode interface.
+
+## Features
+
+- **Cross-platform:** Works on Windows, Linux, macOS, and Android.
+- **Media discovery:** Finds images, videos, and audio files in your selected directory (default: Pictures folder on PC).
+- **Sorting:** Sort media by date or size.
+- **Search:** Search by file name or filter by date range.
+- **Modern UI:** Clean, dark mode interface with grid view and previews.
+
+## Usage
+
+1. Run the app on your platform (Windows, Linux, macOS, or Android).
+2. The app will scan your Pictures directory (or the default directory) for media files.
+3. Use the search bar to filter by name, or pick a date range.
+4. Sort your media by date or size using the dropdown.
+5. Click on thumbnails to preview images. (Video/audio preview support coming soon.)
 
 ## Getting Started
 
-This project is a starting point for a Flutter application.
+To build and run Oui Gallery locally:
 
-A few resources to get you started if this is your first Flutter project:
+```sh
+flutter pub get
+flutter run -d windows # or linux, macos, android
+```
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+## License
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+MIT License. See LICENSE file for details.
