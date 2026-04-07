@@ -1,69 +1,46 @@
 import 'package:flutter/material.dart';
+import 'package:media_kit/media_kit.dart';
 import 'dart:io';
 import 'media_gallery.dart';
 
 void main() {
-  runApp(const MyApp());
+  WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
+  runApp(const BubuGalleryApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class BubuGalleryApp extends StatelessWidget {
+  const BubuGalleryApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Oui Gallery',
+      title: 'Gallery With Your Bubu',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.dark,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.deepPurple,
+          seedColor: const Color(0xFF7C4DFF),
           brightness: Brightness.dark,
+          surface: const Color(0xFF121212),
         ),
+        scaffoldBackgroundColor: const Color(0xFF121212),
         useMaterial3: true,
       ),
-      home: const MyHomePage(title: 'Oui Gallery'),
+      home: MediaGallery(initialDirectories: [_getDefaultDirectory()]),
     );
   }
-}
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
-
-  @override
-  State<MyHomePage> createState() => _MyHomePageState();
-}
-
-class _MyHomePageState extends State<MyHomePage> {
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: Row(
-          children: [
-            Icon(Icons.menu_book_rounded),
-            const SizedBox(width: 8),
-            Text(widget.title),
-          ],
-        ),
-      ),
-      body: MediaGallery(
-        initialDirectory: Platform.environment['USERPROFILE'] != null
-            ? '${Platform.environment['USERPROFILE']}\\Pictures'
-            : '.',
-      ),
-    );
+  static String _getDefaultDirectory() {
+    if (Platform.isWindows) {
+      final userProfile = Platform.environment['USERPROFILE'];
+      if (userProfile != null) return '$userProfile\\Pictures';
+    } else if (Platform.isMacOS || Platform.isLinux) {
+      final home = Platform.environment['HOME'];
+      if (home != null) return '$home/Pictures';
+    } else if (Platform.isAndroid) {
+      return '/storage/emulated/0/DCIM';
+    }
+    return '.';
   }
 }
