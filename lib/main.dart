@@ -2,15 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'dart:io';
 import 'media_gallery.dart';
+import 'settings_service.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
-  runApp(const BubuGalleryApp());
+  final settings = await AppSettings.load();
+  runApp(BubuGalleryApp(settings: settings));
 }
 
 class BubuGalleryApp extends StatelessWidget {
-  const BubuGalleryApp({super.key});
+  final AppSettings settings;
+  const BubuGalleryApp({super.key, required this.settings});
 
   @override
   Widget build(BuildContext context) {
@@ -27,7 +30,12 @@ class BubuGalleryApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFF121212),
         useMaterial3: true,
       ),
-      home: MediaGallery(initialDirectories: [_getDefaultDirectory()]),
+      home: MediaGallery(
+        initialDirectories: settings.directories.isNotEmpty
+            ? settings.directories
+            : [_getDefaultDirectory()],
+        settings: settings,
+      ),
     );
   }
 

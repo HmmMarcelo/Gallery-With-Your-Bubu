@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'media_types.dart';
 import 'media_player.dart';
+import 'image_cropper.dart';
 
 class MediaViewer extends StatefulWidget {
   final List<MediaFile> files;
@@ -161,6 +162,9 @@ class _MediaViewerState extends State<MediaViewer> {
 
   @override
   Widget build(BuildContext context) {
+    final currentExt = p.extension(_currentFile.path).toLowerCase();
+    final isImage = imageExtensions.contains(currentExt);
+
     return Focus(
       focusNode: _focusNode,
       autofocus: true,
@@ -172,55 +176,109 @@ class _MediaViewerState extends State<MediaViewer> {
           child: Stack(
             children: [
               // Page view for swiping between media
-              PageView.builder(
-                controller: _pageController,
-                itemCount: widget.files.length,
-                onPageChanged: (i) => setState(() => _currentIndex = i),
-                itemBuilder: (context, index) {
-                  final file = widget.files[index];
-                  final ext = p.extension(file.path).toLowerCase();
-                  if (imageExtensions.contains(ext)) {
-                    return InteractiveViewer(
-                      minScale: 0.5,
-                      maxScale: 5.0,
-                      child: Center(
-                        child: Image.file(
-                          File(file.path),
-                          errorBuilder: (c, e, s) => Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Icon(
-                                Icons.broken_image,
-                                color: Colors.white24,
-                                size: 64,
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Cannot display this format',
-                                style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.3),
+              ExcludeSemantics(
+                child: PageView.builder(
+                  controller: _pageController,
+                  itemCount: widget.files.length,
+                  onPageChanged: (i) => setState(() => _currentIndex = i),
+                  itemBuilder: (context, index) {
+                    final file = widget.files[index];
+                    final ext = p.extension(file.path).toLowerCase();
+                    if (imageExtensions.contains(ext)) {
+                      return InteractiveViewer(
+                        minScale: 0.5,
+                        maxScale: 5.0,
+                        child: Center(
+                          child: Image.file(
+                            File(file.path),
+                            errorBuilder: (c, e, s) => Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(
+                                  Icons.broken_image,
+                                  color: Colors.white24,
+                                  size: 64,
                                 ),
-                              ),
-                            ],
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Cannot display this format',
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.3),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
+                      );
+                    } else if (videoExtensions.contains(ext)) {
+                      return _VideoViewerPage(
+                        file: file,
+                        getVideoThumbnail: widget.getVideoThumbnail,
+                      );
+                    }
+                    return const Center(
+                      child: Icon(
+                        Icons.insert_drive_file,
+                        color: Colors.white24,
+                        size: 64,
                       ),
                     );
-                  } else if (videoExtensions.contains(ext)) {
-                    return _VideoViewerPage(
-                      file: file,
-                      getVideoThumbnail: widget.getVideoThumbnail,
-                    );
-                  }
-                  return const Center(
-                    child: Icon(
-                      Icons.insert_drive_file,
-                      color: Colors.white24,
-                      size: 64,
-                    ),
-                  );
-                },
+                  },
+                ),
               ),
+              // Left navigation arrow
+              if (_showOverlay && _currentIndex > 0)
+                Positioned(
+                  left: 8,
+                  top: 0,
+                  bottom: 0,
+                  child: Center(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.4),
+                        shape: BoxShape.circle,
+                      ),
+                      child: IconButton(
+                        icon: const Icon(
+                          Icons.arrow_back_ios_rounded,
+                          color: Colors.white70,
+                          size: 28,
+                        ),
+                        onPressed: () => _pageController.previousPage(
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeInOut,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              // Right navigation arrow
+              if (_showOverlay && _currentIndex < widget.files.length - 1)
+                Positioned(
+                  right: 8,
+                  top: 0,
+                  bottom: 0,
+                  child: Center(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.4),
+                        shape: BoxShape.circle,
+                      ),
+                      child: IconButton(
+                        icon: const Icon(
+                          Icons.arrow_forward_ios_rounded,
+                          color: Colors.white70,
+                          size: 28,
+                        ),
+                        onPressed: () => _pageController.nextPage(
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeInOut,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               // Top overlay bar
               if (_showOverlay)
                 Positioned(
@@ -281,6 +339,23 @@ class _MediaViewerState extends State<MediaViewer> {
                                 ],
                               ),
                             ),
+                            if (isImage)
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.crop,
+                                  color: Colors.white,
+                                ),
+                                tooltip: 'Crop',
+                                onPressed: () {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (context) => ImageCropper(
+                                        filePath: _currentFile.path,
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
                             IconButton(
                               icon: const Icon(
                                 Icons.info_outline,
@@ -348,7 +423,7 @@ class _VideoViewerPage extends StatelessWidget {
             future: getVideoThumbnail(file.path, quality: 90, width: 800),
             builder: (context, snapshot) {
               if (snapshot.hasData && snapshot.data != null) {
-                return Center(
+                return SizedBox.expand(
                   child: Image.memory(snapshot.data!, fit: BoxFit.contain),
                 );
               }

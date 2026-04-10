@@ -9,10 +9,16 @@ import 'media_types.dart';
 import 'video_thumbnail_preview.dart';
 import 'media_viewer.dart';
 import 'media_player.dart';
+import 'settings_service.dart';
 
 class MediaGallery extends StatefulWidget {
   final List<String> initialDirectories;
-  const MediaGallery({super.key, required this.initialDirectories});
+  final AppSettings settings;
+  const MediaGallery({
+    super.key,
+    required this.initialDirectories,
+    required this.settings,
+  });
 
   @override
   State<MediaGallery> createState() => _MediaGalleryState();
@@ -32,7 +38,6 @@ class _MediaGalleryState extends State<MediaGallery> {
     int width = 256,
   }) async {
     if (_videoThumbnails.containsKey(path)) return _videoThumbnails[path];
-
     final completer = Completer<Uint8List?>();
     _thumbQueue.add(completer);
     _thumbTasks.add(() => _doLoadThumbnail(path, quality, width));
@@ -86,6 +91,7 @@ class _MediaGalleryState extends State<MediaGallery> {
 
   // --- State ---
   late List<String> directories;
+  late AppSettings _settings;
   double previewSize = 140;
   List<MediaFile> mediaFiles = [];
   List<MediaFile> filteredFiles = [];
@@ -99,6 +105,14 @@ class _MediaGalleryState extends State<MediaGallery> {
   Set<String> _enabledExtensions = {};
   final TextEditingController _searchController = TextEditingController();
 
+  // Selection mode
+  bool _selectionMode = false;
+  final Set<String> _selectedPaths = {};
+
+  // Background
+  Color _bgColor = const Color(0xFF121212);
+  String? _bgImagePath;
+
   static const sortOptions = [
     {'label': 'Date', 'value': 'date'},
     {'label': 'Size', 'value': 'size'},
@@ -106,16 +120,58 @@ class _MediaGalleryState extends State<MediaGallery> {
   ];
 
   static const _monthNames = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December',
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
   ];
 
   @override
   void initState() {
     super.initState();
+    _settings = widget.settings;
     directories = List.from(widget.initialDirectories);
     _enabledExtensions = Set.from(allSupportedExtensions);
+    _loadBackground();
     _scanMediaFiles();
+  }
+
+  void _loadBackground() {
+    if (_settings.backgroundColorHex != null &&
+        _settings.backgroundColorHex!.isNotEmpty) {
+      try {
+        final hex = _settings.backgroundColorHex!.replaceFirst('#', '');
+        if (hex.length == 6) {
+          _bgColor = Color(int.parse('FF$hex', radix: 16));
+        } else if (hex.length == 8) {
+          _bgColor = Color(int.parse(hex, radix: 16));
+        }
+      } catch (_) {}
+    }
+    if (_settings.backgroundImagePath != null) {
+      final f = File(_settings.backgroundImagePath!);
+      if (f.existsSync()) {
+        _bgImagePath = _settings.backgroundImagePath;
+      } else {
+        _settings.backgroundImagePath = null;
+        _bgImagePath = null;
+      }
+    } else {
+      _bgImagePath = null;
+    }
+  }
+
+  Future<void> _saveSettings() async {
+    _settings.directories = List.from(directories);
+    await _settings.save();
   }
 
   @override
@@ -134,7 +190,10 @@ class _MediaGalleryState extends State<MediaGallery> {
       final dir = Directory(dirPath);
       if (!dir.existsSync()) continue;
       try {
-        await for (var entity in dir.list(recursive: true, followLinks: false)) {
+        await for (var entity in dir.list(
+          recursive: true,
+          followLinks: false,
+        )) {
           if (entity is File) {
             final ext = p.extension(entity.path).toLowerCase();
             if (allSupportedExtensions.contains(ext)) {
@@ -179,7 +238,10 @@ class _MediaGalleryState extends State<MediaGallery> {
       final matchesType = _enabledExtensions.contains(ext);
       final matchesText =
           searchText.isEmpty ||
-          p.basename(file.path).toLowerCase().contains(searchText.toLowerCase());
+          p
+              .basename(file.path)
+              .toLowerCase()
+              .contains(searchText.toLowerCase());
       final matchesDate =
           dateRange == null ||
           (file.modified.isAfter(
@@ -202,12 +264,202 @@ class _MediaGalleryState extends State<MediaGallery> {
         files.sort(
           (a, b) =>
               dir *
-              p.basename(a.path).toLowerCase().compareTo(
-                    p.basename(b.path).toLowerCase(),
-                  ),
+              p
+                  .basename(a.path)
+                  .toLowerCase()
+                  .compareTo(p.basename(b.path).toLowerCase()),
         );
       default:
         files.sort((a, b) => dir * a.modified.compareTo(b.modified));
+    }
+  }
+
+  // --- Selection mode ---
+
+  void _toggleSelectionMode() {
+    setState(() {
+      _selectionMode = !_selectionMode;
+      if (!_selectionMode) _selectedPaths.clear();
+    });
+  }
+
+  void _toggleSelection(MediaFile file) {
+    setState(() {
+      if (_selectedPaths.contains(file.path)) {
+        _selectedPaths.remove(file.path);
+      } else {
+        _selectedPaths.add(file.path);
+      }
+    });
+  }
+
+  void _selectAll() {
+    setState(() {
+      _selectedPaths.addAll(filteredFiles.map((f) => f.path));
+    });
+  }
+
+  void _deselectAll() {
+    setState(() => _selectedPaths.clear());
+  }
+
+  Future<void> _deleteSelected() async {
+    final count = _selectedPaths.length;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.redAccent),
+            SizedBox(width: 10),
+            Text('Delete permanently?', style: TextStyle(fontSize: 18)),
+          ],
+        ),
+        content: Text(
+          'This will permanently delete $count file(s) from your computer. This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+
+    int deleted = 0;
+    for (final path in _selectedPaths.toList()) {
+      try {
+        await File(path).delete();
+        deleted++;
+      } catch (_) {}
+    }
+
+    _selectedPaths.clear();
+    _selectionMode = false;
+    await _scanMediaFiles();
+
+    if (mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Deleted $deleted file(s)')));
+    }
+  }
+
+  Future<void> _cutMoveSelected() async {
+    final dest = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'Move files to...',
+    );
+    if (dest == null || !mounted) return;
+
+    int moved = 0;
+    for (final path in _selectedPaths.toList()) {
+      try {
+        final name = p.basename(path);
+        final newPath = p.join(dest, name);
+        try {
+          await File(path).rename(newPath);
+          moved++;
+        } catch (_) {
+          await File(path).copy(newPath);
+          await File(path).delete();
+          moved++;
+        }
+      } catch (_) {}
+    }
+
+    _selectedPaths.clear();
+    _selectionMode = false;
+    await _scanMediaFiles();
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Moved $moved file(s) to ${p.basename(dest)}')),
+      );
+    }
+  }
+
+  Future<void> _copySelected() async {
+    final dest = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'Copy files to...',
+    );
+    if (dest == null || !mounted) return;
+
+    int copied = 0;
+    for (final path in _selectedPaths.toList()) {
+      try {
+        final name = p.basename(path);
+        final newPath = p.join(dest, name);
+        await File(path).copy(newPath);
+        copied++;
+      } catch (_) {}
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Copied $copied file(s) to ${p.basename(dest)}'),
+        ),
+      );
+    }
+
+    setState(() {
+      _selectedPaths.clear();
+      _selectionMode = false;
+    });
+  }
+
+  Future<void> _safeMoveSelected() async {
+    final dest = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'Move files to (safe copy+verify+delete)...',
+    );
+    if (dest == null || !mounted) return;
+
+    int moved = 0;
+    final errors = <String>[];
+
+    for (final path in _selectedPaths.toList()) {
+      try {
+        final name = p.basename(path);
+        final newPath = p.join(dest, name);
+        final sourceFile = File(path);
+        final sourceSize = await sourceFile.length();
+
+        await sourceFile.copy(newPath);
+
+        final destFile = File(newPath);
+        if (await destFile.exists() && await destFile.length() == sourceSize) {
+          await sourceFile.delete();
+          moved++;
+        } else {
+          errors.add(name);
+          if (await destFile.exists()) await destFile.delete();
+        }
+      } catch (e) {
+        errors.add(p.basename(path));
+      }
+    }
+
+    _selectedPaths.clear();
+    _selectionMode = false;
+    await _scanMediaFiles();
+
+    if (mounted) {
+      final msg = 'Safely moved $moved file(s)';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            errors.isEmpty ? msg : '$msg. ${errors.length} failed.',
+          ),
+        ),
+      );
     }
   }
 
@@ -220,6 +472,7 @@ class _MediaGalleryState extends State<MediaGallery> {
         directories: List.from(directories),
         onSave: (newDirs) {
           setState(() => directories = newDirs);
+          _saveSettings();
           _scanMediaFiles();
         },
       ),
@@ -265,13 +518,37 @@ class _MediaGalleryState extends State<MediaGallery> {
     });
   }
 
+  // --- Settings ---
+
+  void _showSettings() {
+    showDialog(
+      context: context,
+      builder: (context) => _SettingsDialog(
+        currentColorHex: _settings.backgroundColorHex,
+        currentImagePath: _bgImagePath,
+        onSave: (colorHex, imagePath) {
+          setState(() {
+            _settings.backgroundColorHex = colorHex;
+            _settings.backgroundImagePath = imagePath;
+            _loadBackground();
+          });
+          _settings.save();
+        },
+      ),
+    );
+  }
+
+  // --- Viewer ---
+
   void _openViewer(MediaFile file) {
     final viewableFiles = <MediaFile>[];
     int viewerIndex = 0;
     for (int i = 0; i < filteredFiles.length; i++) {
       final ext = p.extension(filteredFiles[i].path).toLowerCase();
       if (imageExtensions.contains(ext) || videoExtensions.contains(ext)) {
-        if (identical(filteredFiles[i], file)) viewerIndex = viewableFiles.length;
+        if (identical(filteredFiles[i], file)) {
+          viewerIndex = viewableFiles.length;
+        }
         viewableFiles.add(filteredFiles[i]);
       }
     }
@@ -482,10 +759,11 @@ class _MediaGalleryState extends State<MediaGallery> {
   @override
   Widget build(BuildContext context) {
     final isWide = MediaQuery.of(context).size.width > 600;
-    final typeFilterActive = _enabledExtensions.length < allSupportedExtensions.length;
+    final typeFilterActive =
+        _enabledExtensions.length < allSupportedExtensions.length;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF121212),
+      backgroundColor: _bgColor,
       appBar: AppBar(
         backgroundColor: const Color(0xFF1A1A2E),
         surfaceTintColor: Colors.transparent,
@@ -503,7 +781,7 @@ class _MediaGalleryState extends State<MediaGallery> {
             const SizedBox(width: 4),
             // Search bar
             Expanded(
-              flex: 3,
+              flex: 2,
               child: SizedBox(
                 height: 36,
                 child: TextField(
@@ -551,6 +829,41 @@ class _MediaGalleryState extends State<MediaGallery> {
                   },
                 ),
               ),
+            ),
+            const SizedBox(width: 4),
+            // Select mode toggle
+            IconButton(
+              icon: Icon(
+                _selectionMode
+                    ? Icons.check_box
+                    : Icons.check_box_outline_blank,
+                size: 20,
+                color: _selectionMode
+                    ? const Color(0xFF7C4DFF)
+                    : Colors.white70,
+              ),
+              tooltip: _selectionMode ? 'Exit selection mode' : 'Select files',
+              onPressed: _toggleSelectionMode,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+            ),
+            Text(
+              'Select',
+              style: TextStyle(
+                fontSize: 11,
+                color: _selectionMode
+                    ? const Color(0xFF7C4DFF)
+                    : Colors.white54,
+              ),
+            ),
+            const SizedBox(width: 4),
+            // Refresh button
+            IconButton(
+              icon: const Icon(Icons.refresh, size: 20, color: Colors.white70),
+              tooltip: 'Refresh gallery',
+              onPressed: _scanMediaFiles,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
             ),
             const SizedBox(width: 4),
             // File type filter
@@ -713,64 +1026,153 @@ class _MediaGalleryState extends State<MediaGallery> {
                   ),
                 ),
               ),
+            const SizedBox(width: 4),
+            // Settings button
+            IconButton(
+              icon: const Icon(Icons.settings, size: 20, color: Colors.white70),
+              tooltip: 'Settings',
+              onPressed: _showSettings,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+            ),
           ],
         ),
       ),
-      body: Column(
-        children: [
-          if (loading)
-            Expanded(
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const CircularProgressIndicator(),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Scanning... $_scanCount files found',
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.5),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          else if (filteredFiles.isEmpty)
-            Expanded(
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.photo_library_outlined,
-                      size: 64,
-                      color: Colors.white.withValues(alpha: 0.2),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      mediaFiles.isEmpty
-                          ? 'No media files found'
-                          : 'No files match your filters',
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.5),
-                      ),
-                    ),
-                    if (mediaFiles.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 16),
-                        child: FilledButton.icon(
-                          onPressed: _showFolderManager,
-                          icon: const Icon(Icons.folder_open),
-                          label: const Text('Add a folder'),
+      body: Container(
+        decoration: BoxDecoration(
+          color: _bgColor,
+          image: _bgImagePath != null
+              ? DecorationImage(
+                  image: FileImage(File(_bgImagePath!)),
+                  fit: BoxFit.cover,
+                  opacity: 0.15,
+                )
+              : null,
+        ),
+        child: Column(
+          children: [
+            // Selection action bar
+            if (_selectionMode) _buildSelectionBar(),
+            if (loading)
+              Expanded(
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const CircularProgressIndicator(),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Scanning... $_scanCount files found',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.5),
                         ),
                       ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            )
-          else
-            Expanded(child: _buildGrid()),
+              )
+            else if (filteredFiles.isEmpty)
+              Expanded(
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.photo_library_outlined,
+                        size: 64,
+                        color: Colors.white.withValues(alpha: 0.2),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        mediaFiles.isEmpty
+                            ? 'No media files found'
+                            : 'No files match your filters',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.5),
+                        ),
+                      ),
+                      if (mediaFiles.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 16),
+                          child: FilledButton.icon(
+                            onPressed: _showFolderManager,
+                            icon: const Icon(Icons.folder_open),
+                            label: const Text('Add a folder'),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              )
+            else
+              Expanded(child: ExcludeSemantics(child: _buildGrid())),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSelectionBar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A2E),
+        border: Border(
+          bottom: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+        ),
+      ),
+      child: Row(
+        children: [
+          Text(
+            '${_selectedPaths.length} selected',
+            style: const TextStyle(color: Colors.white70, fontSize: 13),
+          ),
+          const SizedBox(width: 8),
+          TextButton(
+            onPressed: _selectAll,
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text('All', style: TextStyle(fontSize: 12)),
+          ),
+          TextButton(
+            onPressed: _deselectAll,
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text('None', style: TextStyle(fontSize: 12)),
+          ),
+          const Spacer(),
+          if (_selectedPaths.isNotEmpty) ...[
+            _SelectionActionButton(
+              icon: Icons.delete_outline,
+              label: 'Delete',
+              color: Colors.redAccent,
+              onTap: _deleteSelected,
+            ),
+            const SizedBox(width: 4),
+            _SelectionActionButton(
+              icon: Icons.content_cut,
+              label: 'Cut & Move',
+              onTap: _cutMoveSelected,
+            ),
+            const SizedBox(width: 4),
+            _SelectionActionButton(
+              icon: Icons.content_copy,
+              label: 'Copy',
+              onTap: _copySelected,
+            ),
+            const SizedBox(width: 4),
+            _SelectionActionButton(
+              icon: Icons.drive_file_move_outline,
+              label: 'Safe Move',
+              onTap: _safeMoveSelected,
+            ),
+          ],
         ],
       ),
     );
@@ -778,7 +1180,10 @@ class _MediaGalleryState extends State<MediaGallery> {
 
   Widget _buildGrid() {
     final crossAxisCount =
-        (MediaQuery.of(context).size.width / (previewSize + 12)).floor().clamp(2, 12);
+        (MediaQuery.of(context).size.width / (previewSize + 12)).floor().clamp(
+          2,
+          12,
+        );
     final gridDelegate = SliverGridDelegateWithFixedCrossAxisCount(
       crossAxisCount: crossAxisCount,
       crossAxisSpacing: 6,
@@ -801,7 +1206,11 @@ class _MediaGalleryState extends State<MediaGallery> {
         const SliverPadding(padding: EdgeInsets.only(top: 4)),
         for (final section in sections) ...[
           SliverToBoxAdapter(
-            child: _buildSectionHeader(section.title, section.files.length),
+            child: _buildSectionHeader(
+              section.title,
+              section.files.length,
+              section.files,
+            ),
           ),
           SliverPadding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -818,35 +1227,63 @@ class _MediaGalleryState extends State<MediaGallery> {
     );
   }
 
-  Widget _buildSectionHeader(String title, int count) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 2),
-      child: Row(
-        children: [
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: Colors.white.withValues(alpha: 0.7),
+  Widget _buildSectionHeader(String title, int count, List<MediaFile> files) {
+    final allSelected =
+        _selectionMode && files.every((f) => _selectedPaths.contains(f.path));
+    return GestureDetector(
+      onTap: _selectionMode
+          ? () {
+              setState(() {
+                if (allSelected) {
+                  for (final f in files) {
+                    _selectedPaths.remove(f.path);
+                  }
+                } else {
+                  for (final f in files) {
+                    _selectedPaths.add(f.path);
+                  }
+                }
+              });
+            }
+          : null,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 2),
+        child: Row(
+          children: [
+            if (_selectionMode)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Icon(
+                  allSelected ? Icons.check_box : Icons.check_box_outline_blank,
+                  size: 18,
+                  color: allSelected ? const Color(0xFF7C4DFF) : Colors.white38,
+                ),
+              ),
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Colors.white.withValues(alpha: 0.7),
+              ),
             ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            '($count)',
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.white.withValues(alpha: 0.3),
+            const SizedBox(width: 8),
+            Text(
+              '($count)',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.white.withValues(alpha: 0.3),
+              ),
             ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Container(
-              height: 1,
-              color: Colors.white.withValues(alpha: 0.08),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Container(
+                height: 1,
+                color: Colors.white.withValues(alpha: 0.08),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -855,12 +1292,17 @@ class _MediaGalleryState extends State<MediaGallery> {
     final ext = p.extension(file.path).toLowerCase();
     final name = p.basename(file.path);
     final type = getMediaType(ext);
+    final isSelected = _selectedPaths.contains(file.path);
 
     return GestureDetector(
       onTap: () {
-        if (type == MediaType.image || type == MediaType.video) {
+        if (_selectionMode) {
+          _toggleSelection(file);
+          return;
+        }
+        if (type == MediaType.image) {
           _openViewer(file);
-        } else if (type == MediaType.audio) {
+        } else if (type == MediaType.video || type == MediaType.audio) {
           Navigator.of(context).push(
             MaterialPageRoute(
               builder: (context) => InAppMediaPlayer(file: file),
@@ -870,10 +1312,16 @@ class _MediaGalleryState extends State<MediaGallery> {
           _showFileInfo(file);
         }
       },
-      onLongPressStart: (details) =>
-          _showContextMenu(file, details.globalPosition),
-      onSecondaryTapDown: (details) =>
-          _showContextMenu(file, details.globalPosition),
+      onLongPressStart: (details) {
+        if (!_selectionMode) {
+          _showContextMenu(file, details.globalPosition);
+        }
+      },
+      onSecondaryTapDown: (details) {
+        if (!_selectionMode) {
+          _showContextMenu(file, details.globalPosition);
+        }
+      },
       child: ClipRRect(
         borderRadius: BorderRadius.circular(8),
         child: Stack(
@@ -881,6 +1329,9 @@ class _MediaGalleryState extends State<MediaGallery> {
           children: [
             // Thumbnail content
             _buildThumbnail(file, ext, type),
+            // Selection highlight
+            if (_selectionMode && isSelected)
+              Container(color: const Color(0xFF7C4DFF).withValues(alpha: 0.25)),
             // Filename + size overlay at bottom
             Positioned(
               left: 0,
@@ -924,7 +1375,7 @@ class _MediaGalleryState extends State<MediaGallery> {
               ),
             ),
             // Video play icon overlay
-            if (type == MediaType.video)
+            if (type == MediaType.video && !_selectionMode)
               Center(
                 child: Container(
                   padding: const EdgeInsets.all(6),
@@ -939,30 +1390,51 @@ class _MediaGalleryState extends State<MediaGallery> {
                   ),
                 ),
               ),
-            // Info button (top-right)
-            Positioned(
-              top: 4,
-              right: 4,
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () => _showFileInfo(file),
-                  child: Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.4),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.info_outline,
-                      color: Colors.white70,
-                      size: 16,
+            // Selection checkbox (top-left)
+            if (_selectionMode)
+              Positioned(
+                top: 4,
+                left: 4,
+                child: Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? const Color(0xFF7C4DFF)
+                        : Colors.black.withValues(alpha: 0.4),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white70, width: 1.5),
+                  ),
+                  child: isSelected
+                      ? const Icon(Icons.check, color: Colors.white, size: 16)
+                      : null,
+                ),
+              ),
+            // Info button (top-right) - only when not in selection mode
+            if (!_selectionMode)
+              Positioned(
+                top: 4,
+                right: 4,
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () => _showFileInfo(file),
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.4),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.info_outline,
+                        color: Colors.white70,
+                        size: 16,
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
           ],
         ),
       ),
@@ -1046,6 +1518,51 @@ class _Section {
   const _Section(this.title, this.files);
 }
 
+// --- Selection action button ---
+class _SelectionActionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color? color;
+  final VoidCallback onTap;
+
+  const _SelectionActionButton({
+    required this.icon,
+    required this.label,
+    this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: label,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Container(
+          height: 32,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: (color ?? Colors.white).withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16, color: color ?? Colors.white70),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: TextStyle(fontSize: 11, color: color ?? Colors.white70),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // --- Toolbar chip widget ---
 class _ToolbarChip extends StatelessWidget {
   final IconData icon;
@@ -1080,10 +1597,9 @@ class _ToolbarChip extends StatelessWidget {
             borderRadius: BorderRadius.circular(8),
             border: hasValue
                 ? Border.all(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .primary
-                        .withValues(alpha: 0.3),
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.primary.withValues(alpha: 0.3),
                   )
                 : null,
           ),
@@ -1129,10 +1645,7 @@ class _FolderManagerDialog extends StatefulWidget {
   final List<String> directories;
   final ValueChanged<List<String>> onSave;
 
-  const _FolderManagerDialog({
-    required this.directories,
-    required this.onSave,
-  });
+  const _FolderManagerDialog({required this.directories, required this.onSave});
 
   @override
   State<_FolderManagerDialog> createState() => _FolderManagerDialogState();
@@ -1204,7 +1717,11 @@ class _FolderManagerDialogState extends State<_FolderManagerDialog> {
                     final name = p.basename(dir);
                     return ListTile(
                       dense: true,
-                      leading: const Icon(Icons.folder, size: 20, color: Color(0xFF7C4DFF)),
+                      leading: const Icon(
+                        Icons.folder,
+                        size: 20,
+                        color: Color(0xFF7C4DFF),
+                      ),
                       title: Text(
                         name.isEmpty ? dir : name,
                         style: const TextStyle(fontSize: 13),
@@ -1219,7 +1736,11 @@ class _FolderManagerDialogState extends State<_FolderManagerDialog> {
                         overflow: TextOverflow.ellipsis,
                       ),
                       trailing: IconButton(
-                        icon: const Icon(Icons.remove_circle_outline, size: 20, color: Colors.redAccent),
+                        icon: const Icon(
+                          Icons.remove_circle_outline,
+                          size: 20,
+                          color: Colors.redAccent,
+                        ),
                         tooltip: 'Remove',
                         onPressed: () => setState(() => _dirs.removeAt(index)),
                       ),
@@ -1278,7 +1799,8 @@ class _TypeFilterDialogState extends State<_TypeFilterDialog> {
     _enabled = Set.from(widget.enabledExtensions);
   }
 
-  bool _categoryAllOn(Set<String> exts) => exts.every((e) => _enabled.contains(e));
+  bool _categoryAllOn(Set<String> exts) =>
+      exts.every((e) => _enabled.contains(e));
   bool _categoryPartial(Set<String> exts) =>
       exts.any((e) => _enabled.contains(e)) && !_categoryAllOn(exts);
 
@@ -1309,7 +1831,6 @@ class _TypeFilterDialogState extends State<_TypeFilterDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Quick buttons
               Row(
                 children: [
                   OutlinedButton(
@@ -1319,13 +1840,15 @@ class _TypeFilterDialogState extends State<_TypeFilterDialog> {
                   const SizedBox(width: 8),
                   OutlinedButton(
                     onPressed: () => setState(
-                        () => _enabled = Set.from(allSupportedExtensions)),
+                      () => _enabled = Set.from(allSupportedExtensions),
+                    ),
                     child: const Text('Default'),
                   ),
                   const SizedBox(width: 8),
                   OutlinedButton(
                     onPressed: () => setState(
-                        () => _enabled = Set.from(allSupportedExtensions)),
+                      () => _enabled = Set.from(allSupportedExtensions),
+                    ),
                     child: const Text('All'),
                   ),
                 ],
@@ -1369,8 +1892,10 @@ class _TypeFilterDialogState extends State<_TypeFilterDialog> {
         children: [
           Icon(icon, size: 18, color: Colors.white54),
           const SizedBox(width: 8),
-          Text('$name ($count/${exts.length})',
-              style: const TextStyle(fontSize: 14)),
+          Text(
+            '$name ($count/${exts.length})',
+            style: const TextStyle(fontSize: 14),
+          ),
         ],
       ),
       children: [
@@ -1398,6 +1923,318 @@ class _TypeFilterDialogState extends State<_TypeFilterDialog> {
               );
             }).toList(),
           ),
+        ),
+      ],
+    );
+  }
+}
+
+// --- Settings Dialog ---
+class _SettingsDialog extends StatefulWidget {
+  final String? currentColorHex;
+  final String? currentImagePath;
+  final void Function(String? colorHex, String? imagePath) onSave;
+
+  const _SettingsDialog({
+    required this.currentColorHex,
+    required this.currentImagePath,
+    required this.onSave,
+  });
+
+  @override
+  State<_SettingsDialog> createState() => _SettingsDialogState();
+}
+
+class _SettingsDialogState extends State<_SettingsDialog> {
+  late String _bgMode; // 'color' or 'image'
+  String _colorHex = '';
+  String? _imagePath;
+  final TextEditingController _hexController = TextEditingController();
+
+  static const presetColors = [
+    Color(0xFF121212),
+    Color(0xFF1A1A2E),
+    Color(0xFF1B1B1B),
+    Color(0xFF0D1117),
+    Color(0xFF1E1E2E),
+    Color(0xFF2B2D30),
+    Color(0xFF1F2937),
+    Color(0xFF1E3A2F),
+    Color(0xFF2D1B2E),
+    Color(0xFF1A2333),
+    Color(0xFF2E1A1A),
+    Color(0xFF1A1A1A),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _imagePath = widget.currentImagePath;
+    _bgMode = _imagePath != null ? 'image' : 'color';
+    _colorHex = widget.currentColorHex ?? '121212';
+    _hexController.text = _colorHex.replaceFirst('#', '');
+  }
+
+  @override
+  void dispose() {
+    _hexController.dispose();
+    super.dispose();
+  }
+
+  Color _parseHex(String hex) {
+    hex = hex.replaceFirst('#', '');
+    if (hex.length == 6) return Color(int.parse('FF$hex', radix: 16));
+    if (hex.length == 8) return Color(int.parse(hex, radix: 16));
+    return const Color(0xFF121212);
+  }
+
+  String _colorToHex(Color c) {
+    return c.red.toRadixString(16).padLeft(2, '0') +
+        c.green.toRadixString(16).padLeft(2, '0') +
+        c.blue.toRadixString(16).padLeft(2, '0');
+  }
+
+  Future<void> _pickImage() async {
+    final result = await FilePicker.platform.pickFiles(
+      dialogTitle: 'Choose background image',
+      type: FileType.image,
+    );
+    if (result != null && result.files.single.path != null) {
+      setState(() {
+        _imagePath = result.files.single.path;
+        _bgMode = 'image';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: const Row(
+        children: [
+          Icon(Icons.settings, color: Color(0xFF7C4DFF)),
+          SizedBox(width: 10),
+          Text('Settings', style: TextStyle(fontSize: 18)),
+        ],
+      ),
+      content: SizedBox(
+        width: 400,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Gallery Background',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white70,
+                ),
+              ),
+              const SizedBox(height: 12),
+              // Mode toggle
+              Row(
+                children: [
+                  ChoiceChip(
+                    label: const Text('Solid Color'),
+                    selected: _bgMode == 'color',
+                    onSelected: (_) => setState(() => _bgMode = 'color'),
+                  ),
+                  const SizedBox(width: 8),
+                  ChoiceChip(
+                    label: const Text('Image'),
+                    selected: _bgMode == 'image',
+                    onSelected: (_) => setState(() => _bgMode = 'image'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              if (_bgMode == 'color') ...[
+                // Color swatches
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: presetColors.map((color) {
+                    final hex = _colorToHex(color);
+                    final isSelected =
+                        _colorHex.replaceFirst('#', '').toLowerCase() ==
+                        hex.toLowerCase();
+                    return GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          _colorHex = hex;
+                          _hexController.text = hex;
+                        });
+                      },
+                      child: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: color,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: isSelected
+                                ? const Color(0xFF7C4DFF)
+                                : Colors.white24,
+                            width: isSelected ? 2.5 : 1,
+                          ),
+                        ),
+                        child: isSelected
+                            ? const Icon(
+                                Icons.check,
+                                color: Color(0xFF7C4DFF),
+                                size: 18,
+                              )
+                            : null,
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 12),
+                // Custom hex input
+                Row(
+                  children: [
+                    const Text(
+                      '#',
+                      style: TextStyle(color: Colors.white54, fontSize: 14),
+                    ),
+                    const SizedBox(width: 4),
+                    SizedBox(
+                      width: 120,
+                      height: 36,
+                      child: TextField(
+                        controller: _hexController,
+                        maxLength: 6,
+                        decoration: InputDecoration(
+                          counterText: '',
+                          filled: true,
+                          fillColor: Colors.white.withValues(alpha: 0.06),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 0,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontFamily: 'monospace',
+                        ),
+                        onChanged: (val) {
+                          if (val.length == 6 &&
+                              RegExp(r'^[0-9a-fA-F]{6}$').hasMatch(val)) {
+                            setState(() => _colorHex = val);
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // Preview
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: _parseHex(_colorHex),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.white24),
+                      ),
+                    ),
+                  ],
+                ),
+              ] else ...[
+                // Image picker
+                if (_imagePath != null) ...[
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.file(
+                      File(_imagePath!),
+                      height: 120,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                      errorBuilder: (c, e, s) => Container(
+                        height: 120,
+                        color: const Color(0xFF1A1A2E),
+                        child: const Center(
+                          child: Icon(
+                            Icons.broken_image,
+                            color: Colors.white24,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    p.basename(_imagePath!),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.white.withValues(alpha: 0.4),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                Row(
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: _pickImage,
+                      icon: const Icon(Icons.image, size: 16),
+                      label: Text(
+                        _imagePath != null ? 'Change Image' : 'Choose Image',
+                      ),
+                    ),
+                    if (_imagePath != null) ...[
+                      const SizedBox(width: 8),
+                      TextButton(
+                        onPressed: () => setState(() => _imagePath = null),
+                        child: const Text(
+                          'Clear',
+                          style: TextStyle(color: Colors.redAccent),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+              const SizedBox(height: 24),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.03),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'Gallery With Your Bubu  v$appVersion',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.white.withValues(alpha: 0.3),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () {
+            final colorHex = _bgMode == 'color' ? _colorHex : null;
+            final imagePath = _bgMode == 'image' ? _imagePath : null;
+            widget.onSave(colorHex, imagePath);
+            Navigator.pop(context);
+          },
+          child: const Text('Save'),
         ),
       ],
     );

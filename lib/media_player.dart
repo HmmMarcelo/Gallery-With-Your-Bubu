@@ -209,10 +209,12 @@ class _InAppMediaPlayerState extends State<InAppMediaPlayer> {
           children: [
             // Video/Audio content
             if (_isVideo)
-              Center(
-                child: Video(
-                  controller: _videoController,
-                  controls: NoVideoControls,
+              ExcludeSemantics(
+                child: Center(
+                  child: Video(
+                    controller: _videoController,
+                    controls: NoVideoControls,
+                  ),
                 ),
               )
             else
@@ -621,23 +623,6 @@ class _SpeedButton extends StatelessWidget {
       tooltip: 'Playback speed',
       offset: const Offset(0, -300),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: speed != 1.0
-              ? const Color(0xFF7C4DFF).withValues(alpha: 0.2)
-              : Colors.white.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Text(
-          '${speed}x',
-          style: TextStyle(
-            color: speed != 1.0 ? const Color(0xFF7C4DFF) : Colors.white70,
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ),
       itemBuilder: (context) => _InAppMediaPlayerState.speedOptions
           .map(
             (s) => PopupMenuItem<double>(
@@ -663,6 +648,23 @@ class _SpeedButton extends StatelessWidget {
           )
           .toList(),
       onSelected: onSpeedChanged,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: speed != 1.0
+              ? const Color(0xFF7C4DFF).withValues(alpha: 0.2)
+              : Colors.white.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Text(
+          '${speed}x',
+          style: TextStyle(
+            color: speed != 1.0 ? const Color(0xFF7C4DFF) : Colors.white70,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
     );
   }
 }
