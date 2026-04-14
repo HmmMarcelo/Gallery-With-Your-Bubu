@@ -1,6 +1,6 @@
-# Simple & Swet-
+# Simple & Sweet
 
-Download the "Final Product Bubu" file. And open the exe and you're golden.
+Main Priority Windows - Download the "Final Product Bubu" file. And open the exe and you're golden.
 
 
 # Gallery With Your Bubu
