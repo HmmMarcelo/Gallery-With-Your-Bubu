@@ -1,4 +1,10 @@
+# Simple & Swet-
+
+Download the "Final Product Bubu" file. And open the exe and you're golden.
+
+
 # Gallery With Your Bubu
+Yap Yap:
 
 Gallery With Your Bubu is a fast, modern, cross-platform media gallery app for Windows, Linux, macOS, and Android, built with Flutter. Browse, sort, view, and play all your photos, videos, and audio files in a beautiful dark mode interface — with a built-in media player, video trimming, image cropping, and batch file operations.
 
